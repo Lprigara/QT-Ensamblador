@@ -1,284 +1,341 @@
 #include <QCoreApplication>
-
 #include <QTextStream>
 #include <QDebug>
 #include <QFile>
+#include <QStringList>
 
-struct operacion{
-    int modo;
-    QString op;
-};
+QString num2bin(uint num, int length)
+{
+    //Convert decimal to binary
+    QString binary_string = QString::number(num,2);
 
-operacion compararOpcode(QString string){
-    operacion o;
-    if(string == "ADD"){
-        qDebug()<<"add";
-        o.op = "0010";
-        o.modo = 1;
+    //prepend missing 0 for fixed length
+    while(binary_string.length() < length)
+    {
+        binary_string.prepend("0");
     }
-    else if(string == "SUB"){
-        qDebug()<<"sub";
-        o.op = "0011";
-        o.modo = 1;
-    }
-    else if(string == "AND"){
-        qDebug()<<"and";
-        o.op = "0100";
-        o.modo = 1;
-    }
-    else if(string == "OR"){
-        qDebug()<<"or";
-        o.op = "0101";
-        o.modo = 1;
-    }
-    else if(string == "INPUT"){
-        qDebug()<<"input";
-        o.op = "011110";
-        o.modo = 2;
-    }
-    else if(string == "OUTPUTREG"){
-        qDebug()<<"outputreg";
-        o.op = "001110";
-        o.modo = 2;
-    }
-    else if(string == "OUTPUTMEM"){
-        qDebug()<<"outputmem";
-        o.op = "1100";
-        o.modo = 3;
-    }
-    else if(string == "GOTO"){
-        qDebug()<<"goto";
-        o.op = "001001";
-        o.modo = 4;
-    }    
-    else if(string == "NOP"){
-        qDebug()<<"nop";
-        o.op = "111110";
-        o.modo = 4;
-    }
-    else if(string == "FIN"){
-        qDebug()<<"fin";
-        o.op = "111111";
-        o.modo = 4;
-    }
-    else if(string == "LOAD"){
-        qDebug()<<"load";
-        o.op = "1000";
-        o.modo = 5;
-    }
-    else if(string == "SHIFT"){
-        qDebug()<<"shift";
-        o.op = "0111";
-        o.modo = 5;
-    }
-    else if(string == "BEQ"){
-        qDebug()<<"beq";
-        o.op = "001010";
-        o.modo = 6;
-    }
-    else if(string == "BNE"){
-        qDebug()<<"bne";
-        o.op = "001011";
-        o.modo = 6;
-    }
-    
-   return o;
+
+    return binary_string;
 }
 
-QString convertirBin(int operando, int modo){
-    QString intToBin (QString::number( operando, 2 ));
-    if(modo == 0){
-        while(intToBin.length()<4){
-            intToBin.prepend("0");
-        }
+QString parseNum(QString input, int length)
+{
+    //Remove eventually leading R
+    if(input.contains('r', Qt::CaseInsensitive)){
+        input.remove(0, 1);
     }
-    else if(modo == 1){
-        while(intToBin.length()<2){
-            intToBin.prepend("0");
-        }
-    }
-    else if(modo == 2){
-        while(intToBin.length()<8){
-            intToBin.prepend("0");
-        }
-    }
-    else if(modo == 3){
-        while(intToBin.length()<10){
-            intToBin.prepend("0");
-        }
-    }
-    return intToBin;
+
+    //Binary indicated by b
+    if(input.startsWith("b"))
+        return input.mid(1, -1);
+
+
+    //Name indicated by x
+    if(input.startsWith("x"))
+        return input.mid(1, -1);
+
+
+    //Decimal may be indicated by d
+    QString num_decimal;
+
+    if (input.startsWith("d"))
+        num_decimal = input.mid(1,-1);
+    else num_decimal = input;
+
+    uint num = num_decimal.toUInt();
+
+    //Convert decimal to binary
+    QString binary_string = num2bin(num, length);
+
+    return binary_string;
+
 }
 
-void codificacionDesdeFichero(QFile &file){
+QString parseDir(QString input, int length, int lineNumber, int lines = 1)
+{
+    if (input.compare("SELF",Qt::CaseInsensitive) == 0)
+        return num2bin(lineNumber,length);
+
+    //Name indicated by x
+    if(input.startsWith("x"))
+        return input.mid(1, -1);
+
+    bool negative = false;
+    if (input.startsWith("-"))
+    {
+        negative = true;
+        input.remove(0,1);
+    }
+    else if (input.startsWith("+")) input.remove(0,1);
+
+
+    //Process number
+    input = parseNum(input, length);
+
+    //Reconvert to int
+    bool ok;
+    int num = input.toInt(&ok,2);
+
+    //Add or subtract
+    if (negative) num = lineNumber - num + (lines - 1); //lines == number of lines the command produces, e.g. BNE produces 2 lines, which needs to be considered here
+    else num = lineNumber + num;
+
+    //Convert decimal to binary
+    return num2bin(num,length);
+}
+
+void processAndConvert(QFile &file){
+
+    //Input textstream from file
     QTextStream in(&file);
-    QFile fich("cod.txt");
-    fich.open(QFile::WriteOnly);
-    QTextStream out(&fich);
+
+    //Create output file
+    QFile fileOutput("progfile.dat");
+    fileOutput.open(QFile::WriteOnly);
+
+    //Output textstream
+    QTextStream out(&fileOutput);
+
+    unsigned int lineNumber = 0;
+
+    bool showLineNum = false;
+
     while(!in.atEnd()){
-        operacion o;
-        QString linea = in.readLine(); //Almacenamos cada linea para ir traduciendolas una a una
-        QString instruccion, operando, numBinario, cadenaAux, codFinal;
-        int modo, estado=0, i=0, j=0;
+        QString line = in.readLine(); //Read next line
 
-        //Nos quedamos con la operacion (ADD, SUB,..)
-        while(linea[i] != ' '){
-            instruccion[i]=linea[i];
-            i++;
-        }
-        o=compararOpcode(instruccion);
-        codFinal=o.op;
-        modo=o.modo;
 
-        if(modo == 1){ //16 bits -> Registro destino (4b) Registro OperandoA (4b) Registro OperandoB (4b) Opcode (4)
-            while(estado<3){
-                j=0;
-                i++;
-                //Se queda con los registros para despues poder traducirlo a binario
-                while(linea[i] != ' ' && i!=linea.length()){
-                    operando[j]=linea[i];
-                    i++;j++;
-                }
-                //Si hay una R en la cadena, quita el primer elemento (sirve para casos de registros (R3, R4..))
-                if(operando.contains('r', Qt::CaseInsensitive)){
-                    operando.remove(0, 1);
-                }
-                int aux=operando.toInt();
-                numBinario=convertirBin(aux, 0);
-                cadenaAux.append(numBinario);
-                estado++;
-            }
-            codFinal.prepend(cadenaAux);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
+        //Empty lines
+        if (line.length() == 0)
+        {
+            out<<endl;
+            continue;
         }
-        else if(modo == 2){ //16 bits -> Libre (4b) Registro Destino (4b) Puerto (2b) Opcode (6b)
-            cadenaAux = "0000";
-            while(estado < 2){
-                j=0;
-                i++;
-                while(linea[i] != ' ' && i!=linea.length()){
-                    operando[j]=linea[i];
-                    i++;j++;
-                }
 
-                //Si hay una R en la cadena, quita el primer elemento
-                if(operando.contains('r', Qt::CaseInsensitive)){
-                    operando.remove(0, 1);
-                }
-                int aux=operando.toInt();
-                numBinario=convertirBin(aux,estado);
-                cadenaAux.append(numBinario);
-                estado++;
-            }
-            codFinal.prepend(cadenaAux);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
-        }
-        else if(modo == 3){ //16 bits -> Inmediato (8b) Puerto (2b) Libre (2b) Opcode (4b)
-            int bits=2;
-            while(estado < 2){
-                j=0;
-                i++;
-                while(linea[i] != ' ' && i!=linea.length()){
-                    operando[j]=linea[i];
-                    i++;j++;
-                }
-                int aux=operando.toInt();
-                numBinario=convertirBin(aux,bits);
-                cadenaAux.append(numBinario);
-                estado++;
-                bits --;
-            }
-            cadenaAux.append("00");
-            codFinal.prepend(cadenaAux);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
-        }
-        else if(modo == 4){ //16 bits -> Dirección de salto (10b) Opcode (6b)
-            j=0;
-            i++;
-            while(linea[i] != ' ' && i!=linea.length()){
-                operando[j]=linea[i];
-                i++;j++;
-            }
-            int aux=operando.toInt();
-            numBinario=convertirBin(aux,3);
-            codFinal.prepend(numBinario);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
-        }
-        else if(modo == 5){ //16 bits -> Registro (4b) Valor constante (8b) Opcode (4b)
-            int bits=0;
-            while(estado<2){
-                j=0;
-                i++;
-                while(linea[i] != ' ' && i!=linea.length()){
-                    operando[j]=linea[i];
-                    i++;j++;
-                }
-
-                //Si hay una R en la cadena, quita el primer elemento
-                if(operando.contains('r', Qt::CaseInsensitive)){
-                    operando.remove(0, 1);
-                }
-                int aux=operando.toInt();
-                numBinario=convertirBin(aux, bits);
-                cadenaAux.append(numBinario);
-                estado++;
-                bits = bits + 2;
-            }
-            codFinal.prepend(cadenaAux);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
-        }
-        else if(modo == 6){ //BEQ y BNE, llevan implicita una resta, que tambien se traducira
-            while(estado<2){
-                j=0;
-                i++;
-                while(linea[i] != ' '){
-                    operando[j]=linea[i];
-                    i++;j++;
-                }
-                //Si hay una R en la cadena, quita el primer elemento
-                if(operando.contains('r', Qt::CaseInsensitive)){
-                    operando.remove(0, 1);
-                }
-                int aux=operando.toInt();
-                numBinario=convertirBin(aux, 0);
-                cadenaAux.append(numBinario);
-                estado++;
-            }
-            cadenaAux.prepend("1111");
-            cadenaAux.append("0011");
-            qDebug()<<cadenaAux;
-            j=0;i++;
-            while(linea[i] != ' ' && i!=linea.length()){
-                operando[j]=linea[i];
-                i++;j++;
-            }
-            int aux=operando.toInt();
-            numBinario=convertirBin(aux, 3);
-            codFinal.prepend(numBinario);
-            qDebug()<<codFinal;
-            out<<codFinal<<endl;
+        //Comment line
+        if (line.startsWith("//") || line.startsWith("#"))
+        {
+            if (!showLineNum)
+                showLineNum = line.startsWith("###");
+            qDebug()<<line;
+            out<<line<<endl;
+            continue;
         }
 
 
+        //Split command and arguments
+        QStringList lineSplit = line.split(" ", QString::SkipEmptyParts);
+        QString cmd = lineSplit.first();
+        lineSplit.removeFirst();
+        QStringList args = lineSplit;
 
-    }
+
+        QString opcode;
+
+        if (cmd == "ADD")
+        {
+            opcode = "0010";
+            QString reg_dest = parseNum(args[0],4);
+            QString reg_op1 = parseNum(args[1],4);
+            QString reg_op2 = parseNum(args[2],4);
+            out<<reg_dest<<reg_op1<<reg_op2<<opcode;
+            qDebug()<<lineNumber<<"ADD"<<reg_dest<<reg_op1<<reg_op2<<opcode;
+        }
+        else if (cmd == "SUB")
+        {
+            opcode = "0011";
+            QString reg_dest = parseNum(args[0],4);
+            QString reg_op1 = parseNum(args[1],4);
+            QString reg_op2 = parseNum(args[2],4);
+            out<<reg_dest<<reg_op1<<reg_op2<<opcode;
+            qDebug()<<lineNumber<<"SUB"<<reg_dest<<reg_op1<<reg_op2<<opcode;
+        }
+        else if (cmd == "AND")
+        {
+            opcode = "0100";
+            QString reg_dest = parseNum(args[0],4);
+            QString reg_op1 = parseNum(args[1],4);
+            QString reg_op2 = parseNum(args[2],4);
+            out<<reg_dest<<reg_op1<<reg_op2<<opcode;
+            qDebug()<<lineNumber<<"AND"<<reg_dest<<reg_op1<<reg_op2<<opcode;
+        }
+        else if (cmd == "OR")
+        {
+            opcode = "0101";
+            QString reg_dest = parseNum(args[0],4);
+            QString reg_op1 = parseNum(args[1],4);
+            QString reg_op2 = parseNum(args[2],4);
+            out<<reg_dest<<reg_op1<<reg_op2<<opcode;
+            qDebug()<<lineNumber<<"OR"<<reg_dest<<reg_op1<<reg_op2<<opcode;
+        }
+        else if (cmd == "SHIFT")
+        {
+            opcode = "0111";
+            QString reg_dest = parseNum(args[0],4);
+            QString reg_op1 = parseNum(args[1],4);
+            QString reg_op2 = "0000";
+            out<<reg_dest<<reg_op1<<reg_op2<<opcode;
+            qDebug()<<lineNumber<<"SHIFT"<<reg_dest<<reg_op1<<reg_op2<<opcode;
+        }
+        else if (cmd == "OUTPUTREG")
+        {
+            opcode = "001110";
+            QString dc = "0000";
+            QString reg_origin = parseNum(args[0],4);
+            QString port = parseNum(args[1],2);
+            out<<dc<<reg_origin<<port<<opcode;
+            qDebug()<<lineNumber<<"OUTPUTREG"<<dc<<reg_origin<<port<<opcode;
+        }
+        else if (cmd == "OUTPUTMEM")
+        {
+            opcode = "1100";
+            QString value = parseNum(args[0],8);
+            QString port = parseNum(args[1],2);
+            QString dc = "00";
+            out<<value<<port<<dc<<opcode;
+            qDebug()<<lineNumber<<"OUTPUTMEM"<<value<<port<<dc<<opcode;
+        }
+        else if (cmd == "GOTO")
+        {
+            opcode = "001001";
+            QString dir = parseDir(args[0],10,lineNumber);
+            out<<dir<<opcode;
+            qDebug()<<lineNumber<<"GOTO"<<dir<<opcode;
+        }
+        else if (cmd == "NOP")
+        {
+            opcode = "111110"; //or jumpt to next line?
+            qDebug()<<"NOP: NOT IMPLEMENTED";
+        }
+        else if (cmd == "FIN")
+        {
+            opcode = "111111";
+            QString dc = "0000000000";
+            out<<dc<<opcode;
+            qDebug()<<lineNumber<<"GOTO"<<dc<<opcode;
+        }
+        else if (cmd == "LOAD")
+        {
+            opcode = "1000";
+            QString reg_dest = parseNum(args[0],4);
+            QString value = parseNum(args[1],8);
+            out<<reg_dest<<value<<opcode;
+            qDebug()<<lineNumber<<"LOAD"<<reg_dest<<value<<opcode;
+        }
+        else if (cmd == "BEQ")
+        {
+            opcode = "001010";
+            //subtract arg1 and arg2
+            QString reg_op1 = parseNum(args[0],4);
+            QString reg_op2 = parseNum(args[1],4);
+            QString dir = parseDir(args[2],10,lineNumber, 2);
+            QString sub_dest = "1111";
+            QString sub_opcode = "0011";
+            out<<sub_dest<<reg_op1<<reg_op2<<sub_opcode;
+            if (showLineNum)
+            {
+                out <<"\tLine: "<< lineNumber << "\t" << num2bin(lineNumber,10);
+                showLineNum = false;
+            }
+            out<<endl;
+            qDebug()<<lineNumber<<"BEQ-SUB"<<sub_dest<<reg_op1<<reg_op2<<sub_opcode;
+            lineNumber++;
+            //jump on eq0
+            out<<dir<<opcode;
+            qDebug()<<lineNumber<<"BEQ-JUMP"<<dir<<opcode;
+        }
+        else if (cmd == "BNE")
+        {
+            opcode = "001011";
+            //subtract arg1 and arg2
+            QString reg_op1 = parseNum(args[0],4);
+            QString reg_op2 = parseNum(args[1],4);
+            QString dir = parseDir(args[2],10,lineNumber, 2);
+            QString sub_dest = "1111";
+            QString sub_opcode = "0011";
+            out<<sub_dest<<reg_op1<<reg_op2<<sub_opcode;
+            if (showLineNum)
+            {
+                out <<"\tLine: "<< lineNumber << "\t" << num2bin(lineNumber,10);
+                showLineNum = false;
+            }
+            out<<endl;
+            qDebug()<<lineNumber<<"BNE-SUB"<<sub_dest<<reg_op1<<reg_op2<<sub_opcode;
+            lineNumber++;
+            //jump on eq0
+            out<<dir<<opcode;
+            qDebug()<<lineNumber<<"BNE-JUMP"<<dir<<opcode;
+        }
+        else if (cmd == "INPUT")
+        {
+            opcode = "011110";
+            QString reg_dest = parseNum(args[0],4);
+            QString dc = "0000";
+            QString port = parseNum(args[1],2);
+            out<<reg_dest<<dc<<port<<opcode;
+            qDebug()<<lineNumber<<"INPUT"<<reg_dest<<dc<<port<<opcode;
+        }
+        else if (cmd == "CLK")
+        {
+            opcode = "111001";
+            QString dc = "0000000000";
+            out<<dc<<opcode;
+            qDebug()<<lineNumber<<"CLK"<<dc<<opcode;
+        }
+        else {
+            qDebug()<<"Unknown command:"<<cmd<<args;
+        }
+
+
+        //Handle comments at ends of lines
+        QString comments;
+        if(line.contains("//"))
+        {
+            int index = line.indexOf("//");
+            comments = line.mid(index,-1);
+        }
+        else if(line.contains("#"))
+        {
+            int index = line.indexOf("#");
+            comments = line.mid(index,-1);
+        }
+
+        if (showLineNum)
+        {
+            out <<"\tLine: "<< lineNumber << "\t" << num2bin(lineNumber,10);
+            showLineNum = false;
+        }
+
+        //Add comments if existing
+        if (comments.length() > 0)
+        {
+            if(comments.contains("SHOWNUM", Qt::CaseInsensitive))
+            {
+                out<<"\tLine: "<< lineNumber << "\t" << num2bin(lineNumber,10) << "\t"<<comments;
+            }
+            else
+            {
+                out<<"\t"<<comments;
+            }
+        }
+
+        //End line
+        out<<endl;
+        lineNumber++;
+
+    }//while !atEnd
+
+
+    fileOutput.close();
 }
 
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
 
-    QFile file("file.txt");
+    QFile file("input.txt");
     file.open(QIODevice::ReadOnly);
-    codificacionDesdeFichero(file);
+    processAndConvert(file);
+    file.close();
 
-
-    return a.exec();
+    return 0;
 }
-
-
