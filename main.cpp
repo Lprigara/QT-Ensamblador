@@ -61,27 +61,39 @@ QString parseDir(QString input, int length, int lineNumber, int lines = 1)
         return input.mid(1, -1);
 
     bool negative = false;
+    bool positive = false;
+
     if (input.startsWith("-"))
     {
         negative = true;
         input.remove(0,1);
     }
-    else if (input.startsWith("+")) input.remove(0,1);
+    else if (input.startsWith("+"))
+    {
+        positive = true;
+        input.remove(0,1);
+    }
 
 
     //Process number
     input = parseNum(input, length);
 
-    //Reconvert to int
-    bool ok;
-    int num = input.toInt(&ok,2);
+    //+/- lines
+    if (positive || negative)
+    {
+        //Reconvert to int
+        bool ok;
+        int num = input.toInt(&ok,2);
 
-    //Add or subtract
-    if (negative) num = lineNumber - num + (lines - 1); //lines == number of lines the command produces, e.g. BNE produces 2 lines, which needs to be considered here
-    else num = lineNumber + num;
+        //Add or subtract
+        if (negative) num = lineNumber - num; //lines == number of lines the command produces, e.g. BNE produces 2 lines, which needs to be considered here
+        else if (positive) num = lineNumber + num + (lines - 1);
 
-    //Convert decimal to binary
-    return num2bin(num,length);
+        //Convert decimal to binary
+        return num2bin(num,length);
+    }
+    else return input;
+
 }
 
 void processAndConvert(QFile &file){
@@ -301,7 +313,7 @@ void processAndConvert(QFile &file){
 
         if (showLineNum)
         {
-            out <<"\tLine: "<< lineNumber << "\t" << num2bin(lineNumber,10);
+            out <<"\t//Line: "<< lineNumber << "\t" << num2bin(lineNumber,10);
             showLineNum = false;
         }
 
